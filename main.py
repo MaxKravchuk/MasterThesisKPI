@@ -1,11 +1,11 @@
 import sys
 import numpy as np
 import cv2 as cv
-from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QComboBox, QGridLayout
+from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QComboBox,
+                             QGridLayout, QPlainTextEdit)
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtCore import QTimer, Qt
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
-from torch.backends.mkl import verbose
 from ultralytics import YOLO
 
 
@@ -16,6 +16,8 @@ class VisionSensorApp(QWidget):
         self.sim = self.client.require('sim')
         self.simulation_running = False
         self.vision_sensors = {}
+        self.target_handlers = {}
+        self.selected_target = None
         self.proximity_sensor = None
         self.vision_sensor_script_funcs = None
         self.video_timer = QTimer()
@@ -27,6 +29,7 @@ class VisionSensorApp(QWidget):
             'Green': 'Green',
             'Blue': 'Blue'
         }
+        self.status_label = None
         self.init_ui()
         self.load_scene()
 
@@ -77,8 +80,12 @@ class VisionSensorApp(QWidget):
         main_layout.addLayout(video_grid_layout)
 
         # Status bar
-        status_label = QLabel("Scene information")
-        scene_info_layout.addWidget(status_label)
+        self.status_label = QPlainTextEdit()
+        self.status_label.setReadOnly(True)
+        self.status_label.setPlaceholderText("Scene info")
+        self.status_label.setStyleSheet("border: 1px solid black;")
+        self.status_label.setFixedSize(774, 80)
+        scene_info_layout.addWidget(self.status_label)
 
         main_layout.addLayout(scene_info_layout)
 
@@ -96,7 +103,7 @@ class VisionSensorApp(QWidget):
     def load_scene(self):
         try:
             print('Loading scene...')
-            self.sim.loadScene('E:/KPI/Dipl/pyClient/objectTracking.ttt')
+            self.sim.loadScene('C:/MasterThesisKPI/objectTrackingDipl.ttt')
             print('Scene loaded.')
 
             # Get vision sensor handles
@@ -105,7 +112,12 @@ class VisionSensorApp(QWidget):
             self.vision_sensors['HSV'] = self.sim.getObject('/UR5/hsv')
             self.vision_sensors['Mask'] = self.sim.getObject('/UR5/mask')
             self.proximity_sensor = self.sim.getObject('/UR5/Proximity_sensor')
+            for name in ['red', 'green', 'blue']:
+                self.target_handlers[name] = self.sim.getObject(f"/PioneerP3DX_{name}")
+                print(f"{name} target handlers loaded")
 
+            # Default target
+            self.selected_target = self.target_handlers['red']
             self.set_noVideo_pixmap()
 
         except Exception as e:
@@ -140,6 +152,7 @@ class VisionSensorApp(QWidget):
             try:
                 self.selected_color = self.color_selector.currentText()
                 self.vision_sensor_script_funcs.setColorToTrack(self.selected_color)
+                self.selected_target = self.target_handlers[self.selected_color.lower()]
             except Exception as e:
                 print(f'An error occurred while updating the selected color: {e}')
 
@@ -187,11 +200,9 @@ class VisionSensorApp(QWidget):
                 except Exception as e:
                     print(f'An error occurred while getting video output for {name}: {e}')
 
-        #print(sim.checkProximitySensor(self.Prox_sens, self.robot_red))
         try:
-            res, dist, point, obj, n = self.sim.readProximitySensor(
-                self.proximity_sensor)
-            print(res, dist, point, obj, n)
+            res, dist, point, obj, n = self.sim.checkProximitySensor(self.proximity_sensor, self.selected_target)
+            self.status_label.appendPlainText(f"Distance to {obj} is {dist}")
         except Exception as e:
             print(f'An error occurred while reading proximity sensor: {e}')
 
