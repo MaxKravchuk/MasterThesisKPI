@@ -16,6 +16,7 @@ class VisionSensorApp(QWidget):
         self.sim = self.client.require('sim')
         self.simulation_running = False
         self.vision_sensors = {}
+        self.proximity_sensor = None
         self.vision_sensor_script_funcs = None
         self.video_timer = QTimer()
         self.model = YOLO('./model_robot.pt')
@@ -35,6 +36,7 @@ class VisionSensorApp(QWidget):
         main_layout = QVBoxLayout()
         control_layout = QHBoxLayout()
         video_grid_layout = QGridLayout()
+        scene_info_layout = QHBoxLayout()
 
         # Header with system name and buttons
         system_name_label = QLabel("Object Tracking System")
@@ -73,6 +75,13 @@ class VisionSensorApp(QWidget):
             video_grid_layout.addWidget(label, i, 2)
 
         main_layout.addLayout(video_grid_layout)
+
+        # Status bar
+        status_label = QLabel("Scene information")
+        scene_info_layout.addWidget(status_label)
+
+        main_layout.addLayout(scene_info_layout)
+
         self.setLayout(main_layout)
 
         self.closeEvent = self.on_close
@@ -95,6 +104,7 @@ class VisionSensorApp(QWidget):
             self.vision_sensor_script_funcs = self.sim.getScriptFunctions(self.sim.getObject('/UR5/Vision_sensor/Script'))
             self.vision_sensors['HSV'] = self.sim.getObject('/UR5/hsv')
             self.vision_sensors['Mask'] = self.sim.getObject('/UR5/mask')
+            self.proximity_sensor = self.sim.getObject('/UR5/Proximity_sensor')
 
             self.set_noVideo_pixmap()
 
@@ -176,6 +186,14 @@ class VisionSensorApp(QWidget):
 
                 except Exception as e:
                     print(f'An error occurred while getting video output for {name}: {e}')
+
+        #print(sim.checkProximitySensor(self.Prox_sens, self.robot_red))
+        try:
+            res, dist, point, obj, n = self.sim.readProximitySensor(
+                self.proximity_sensor)
+            print(res, dist, point, obj, n)
+        except Exception as e:
+            print(f'An error occurred while reading proximity sensor: {e}')
 
     def on_close(self, event):
         if self.simulation_running:
