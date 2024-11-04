@@ -1,3 +1,5 @@
+import os
+from dotenv import load_dotenv
 import sys
 import numpy as np
 import cv2 as cv
@@ -12,6 +14,10 @@ from ultralytics import YOLO
 class VisionSensorApp(QWidget):
     def __init__(self):
         super().__init__()
+
+        # Load environment variables
+        load_dotenv()
+
         self.client = RemoteAPIClient()
         self.sim = self.client.require('sim')
         self.simulation_running = False
@@ -21,8 +27,8 @@ class VisionSensorApp(QWidget):
         self.proximity_sensor = None
         self.vision_sensor_script_funcs = None
         self.video_timer = QTimer()
-        self.model = YOLO('./model_robot.pt')
-        self.no_video_pixmap = QPixmap('./NoVideo.webp')
+        self.model = YOLO(os.getenv('YOLO_MODEL_PATH'))
+        self.no_video_pixmap = QPixmap(os.getenv('NO_VIDEO_IMAGE_PATH'))
         self.selected_color = 'Red'
         self.color_ranges = {
             'Red': 'Red',
@@ -100,13 +106,17 @@ class VisionSensorApp(QWidget):
             label.setPixmap(self.no_video_pixmap.scaled(256, 256, Qt.AspectRatioMode.KeepAspectRatio,
                                                         Qt.TransformationMode.SmoothTransformation))
 
+    def append_status(self, text):
+        self.status_label.appendPlainText(text)
+
     def load_scene(self):
         try:
-            print('Loading scene...')
-            self.sim.loadScene('C:/MasterThesisKPI/objectTrackingDipl.ttt')
-            print('Scene loaded.')
+            self.append_status('Loading the scene...')
+            self.sim.loadScene(os.getenv('SCENE_PATH'))
+            self.append_status('Scene loaded successfully.')
 
             # Get vision sensor handles
+            self.append_status('Getting handles...')
             self.vision_sensors['Main'] = self.sim.getObject('/UR5/Vision_sensor')
             self.vision_sensor_script_funcs = self.sim.getScriptFunctions(self.sim.getObject('/UR5/Vision_sensor/Script'))
             self.vision_sensors['HSV'] = self.sim.getObject('/UR5/hsv')
@@ -114,7 +124,7 @@ class VisionSensorApp(QWidget):
             self.proximity_sensor = self.sim.getObject('/UR5/Proximity_sensor')
             for name in ['red', 'green', 'blue']:
                 self.target_handlers[name] = self.sim.getObject(f"/PioneerP3DX_{name}")
-                print(f"{name} target handlers loaded")
+            self.append_status('Handles retrieved successfully.')
 
             # Default target
             self.selected_target = self.target_handlers['red']
@@ -126,10 +136,10 @@ class VisionSensorApp(QWidget):
     def start_simulation(self):
         if not self.simulation_running:
             try:
-                print('Starting the simulation...')
+                self.append_status('Starting the simulation...')
                 self.sim.startSimulation()
                 self.simulation_running = True
-                print('Simulation started.')
+                self.append_status('Simulation started.')
                 self.video_timer.timeout.connect(self.get_real_time_video_output)
                 self.video_timer.start(100)
             except Exception as e:
@@ -138,12 +148,12 @@ class VisionSensorApp(QWidget):
     def stop_simulation(self):
         if self.simulation_running:
             try:
-                print('Stopping the simulation...')
+                self.append_status('Stopping the simulation...')
                 self.sim.stopSimulation()
                 self.simulation_running = False
                 self.set_noVideo_pixmap()
                 self.video_timer.stop()
-                print('Simulation stopped.')
+                self.append_status('Simulation stopped.')
             except Exception as e:
                 print(f'An error occurred while stopping the simulation: {e}')
 
@@ -202,7 +212,8 @@ class VisionSensorApp(QWidget):
 
         try:
             res, dist, point, obj, n = self.sim.checkProximitySensor(self.proximity_sensor, self.selected_target)
-            self.status_label.appendPlainText(f"Distance to {obj} is {dist}")
+            if res:
+                self.append_status(f"Distance to {obj} is {dist}")
         except Exception as e:
             print(f'An error occurred while reading proximity sensor: {e}')
 

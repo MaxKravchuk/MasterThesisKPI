@@ -1,0 +1,27 @@
+#train: ./train/images
+#val: ./valid/images
+#test: ./test/images
+#
+#nc: 3
+#names: [ 'cube', 'person', 'tree' ]
+#
+#roboflow:
+#  workspace: kpi-maotx
+#  project: masterdipl
+#  version: 1
+#  license: CC BY 4.0
+#  url: https://universe.roboflow.com/kpi-maotx/masterdipl/dataset/1
+
+train: ./robot/train/images
+val: ./robot/valid/images
+test: ./robot/test/images
+
+nc: 1
+names: ['robot']
+
+roboflow:
+  workspace: kpi-maotx
+  project: robot_detection-b6ndt
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/kpi-maotx/robot_detection-b6ndt/dataset/1
