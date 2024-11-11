@@ -4,11 +4,10 @@ import sys
 import numpy as np
 import cv2 as cv
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QComboBox,
-                             QPlainTextEdit, QRadioButton)
+                             QPlainTextEdit)
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtCore import QTimer, Qt
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
-from sympy.strategies.tree import treeapply
 from ultralytics import YOLO
 
 
@@ -32,12 +31,14 @@ class VisionSensorApp(QWidget):
         self.model = YOLO(os.getenv('YOLO_MODEL_PATH'))
         self.no_video_pixmap = QPixmap(os.getenv('NO_VIDEO_IMAGE_PATH'))
         self.selected_color = 'Red'
+        self.selected_mode = 'Tracking'
         self.color_ranges = {
             'Red': 'Red',
             'Green': 'Green',
             'Blue': 'Blue'
         }
         self.status_label = None
+        self.cameraMode = 1
         self.init_ui()
         self.load_scene()
 
@@ -63,29 +64,15 @@ class VisionSensorApp(QWidget):
 
         main_layout.addLayout(top_layout)
 
-        # options_layout = QHBoxLayout()
-        #
-        # left_options_layout = QHBoxLayout()
-        # self.b1 = QRadioButton("Tracking mode")
-        # self.b1.setChecked(True)
-        # self.b1.toggled.connect(self.toggleCameraMode)
-        # options_layout.addWidget(self.b1)
-        #
-        # self.b2 = QRadioButton("Driving mode")
-        # options_layout.addWidget(self.b2)
-        # self.b2.toggled.connect(self.toggleCameraMode)
-        # options_layout.addLayout(left_options_layout)
-        #
-        # right_options_layout = QHBoxLayout()
-        # self.b3 = QRadioButton("Ground target")
-        # self.b3.setChecked(True)
-        # options_layout.addWidget(self.b3)
-        #
-        # self.b4 = QRadioButton("Air target")
-        # options_layout.addWidget(self.b4)
-        #
-        # options_layout.addLayout(right_options_layout)
-        # main_layout.addLayout(options_layout)
+        options_layout = QHBoxLayout()
+
+        # Group 1 - Tracking/Driving mode
+        self.mode_selector = QComboBox()
+        self.mode_selector.addItems(["Tracking", "Driving"])
+        self.mode_selector.currentTextChanged.connect(self.toggleCameraMode)
+        options_layout.addWidget(self.mode_selector)
+
+        main_layout.addLayout(options_layout)
 
         # Top Box
         top_box = QLabel()
@@ -154,7 +141,7 @@ class VisionSensorApp(QWidget):
             # Get vision sensor handles
             self.append_status('Getting handles...')
             self.vision_sensors['Main'] = self.sim.getObject('/PioneerP3DX_main/UR5/Vision_sensor')
-            #self.vision_sensors['Front_camera'] = self.sim.getObject('/PioneerP3DX_main/Front_camera')
+            self.vision_sensors['Front_camera'] = self.sim.getObject('/PioneerP3DX_main/Front_camera')
             self.vision_sensor_script_funcs = self.sim.getScriptFunctions(
                 self.sim.getObject('/PioneerP3DX_main/UR5/Vision_sensor/Script'))
             self.proximity_sensor = self.sim.getObject('/PioneerP3DX_main/UR5/Proximity_sensor')
@@ -205,38 +192,55 @@ class VisionSensorApp(QWidget):
             except Exception as e:
                 print(f'An error occurred while updating the selected color: {e}')
 
-    # def toggleCameraMode(self):
-    #     try:
-    #         if self.b1.isChecked():
-    #             self.vision_sensor_script_funcs.toggleTracking(1)
-    #         elif self.b2.isChecked():
-    #             self.vision_sensor_script_funcs.toggleTracking(0)
-    #     except Exception as e:
-    #         print(f'An error occurred while toggling camera mode: {e}')
+    def toggleCameraMode(self):
+        if self.simulation_running:
+            try:
+                self.selected_mode = self.mode_selector.currentText()
+                if self.selected_mode == 'Tracking':
+                    self.vision_sensor_script_funcs.toggleTracking(1)
+                    self.cameraMode = 1
+                elif self.selected_mode == 'Driving':
+                    self.vision_sensor_script_funcs.toggleTracking(0)
+                    self.cameraMode = 0
+            except Exception as e:
+                print(f'An error occurred while toggling camera mode: {e}')
 
     def get_real_time_video_output(self):
         try:
-            # img, resolution = None, None
-            # if self.b1.isChecked():
-            #     img, resolution = self.sim.getVisionSensorImage(self.vision_sensors['Main'])
-            # elif self.b2.isChecked():
-            #     img, resolution = self.sim.getVisionSensorImage(self.vision_sensors['Front_camera'])
-            img, resolution = self.sim.getVisionSensorImage(self.vision_sensors['Main'])
-            if img is not None and resolution:
-                frame = np.frombuffer(img, dtype=np.uint8).reshape(resolution[1], resolution[0], 3)
-                frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
-                frame = cv.flip(frame, 0)
+            imgMain, resolutionMain = self.sim.getVisionSensorImg(self.vision_sensors['Main'])
+            imgFC, resolutionFC = self.sim.getVisionSensorImg(self.vision_sensors['Front_camera'])
+            if imgMain is not None and imgFC is not None and resolutionMain and resolutionFC:
 
-                # Process frame with YOLO model
-                results = self.model.predict(source=frame, save=False, show=False, conf=0.5, verbose=False)
-                annotated_frame = results[0].plot()
+                if self.cameraMode == 1:
+                    frame = np.frombuffer(imgMain, dtype=np.uint8).reshape(resolutionMain[1], resolutionMain[0], 3)
+                    frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
+                    frame = cv.flip(frame, 0)
 
-                # Convert frame for PyQt display
-                annotated_frame = cv.cvtColor(annotated_frame, cv.COLOR_BGR2RGB)
-                qimg = QImage(annotated_frame.data, annotated_frame.shape[1], annotated_frame.shape[0],
-                              annotated_frame.strides[0], QImage.Format.Format_RGB888)
-                pixmap = QPixmap.fromImage(qimg)
-                self.main_video_label.setPixmap(pixmap)
+                    # Process frame with YOLO model
+                    results = self.model.predict(source=frame, save=False, show=False, conf=0.5, verbose=False)
+                    annotated_frame = results[0].plot()
+
+                    # Convert frame for PyQt display
+                    annotated_frame = cv.cvtColor(annotated_frame, cv.COLOR_BGR2RGB)
+                    qimg = QImage(annotated_frame.data, annotated_frame.shape[1], annotated_frame.shape[0],
+                                  annotated_frame.strides[0], QImage.Format.Format_RGB888)
+                    pixmap = QPixmap.fromImage(qimg)
+                    self.main_video_label.setPixmap(pixmap)
+                elif self.cameraMode == 0:
+                    frame = np.frombuffer(imgFC, dtype=np.uint8).reshape(resolutionFC[1], resolutionFC[0], 3)
+                    frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
+                    frame = cv.flip(frame, 0)
+
+                    # Process frame with YOLO model
+                    results = self.model.predict(source=frame, save=False, show=False, conf=0.5, verbose=False)
+                    annotated_frame = results[0].plot()
+
+                    # Convert frame for PyQt display
+                    annotated_frame = cv.cvtColor(annotated_frame, cv.COLOR_BGR2RGB)
+                    qimg = QImage(annotated_frame.data, annotated_frame.shape[1], annotated_frame.shape[0],
+                                  annotated_frame.strides[0], QImage.Format.Format_RGB888)
+                    pixmap = QPixmap.fromImage(qimg)
+                    self.main_video_label.setPixmap(pixmap)
         except Exception as e:
             print(f'An error occurred while getting main video output: {e}')
 
