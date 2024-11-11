@@ -4,10 +4,11 @@ import sys
 import numpy as np
 import cv2 as cv
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QComboBox,
-                             QGridLayout, QPlainTextEdit)
+                             QPlainTextEdit, QRadioButton)
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtCore import QTimer, Qt
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
+from sympy.strategies.tree import treeapply
 from ultralytics import YOLO
 
 
@@ -27,6 +28,7 @@ class VisionSensorApp(QWidget):
         self.proximity_sensor = None
         self.vision_sensor_script_funcs = None
         self.video_timer = QTimer()
+        self.proximity_timer = QTimer()
         self.model = YOLO(os.getenv('YOLO_MODEL_PATH'))
         self.no_video_pixmap = QPixmap(os.getenv('NO_VIDEO_IMAGE_PATH'))
         self.selected_color = 'Red'
@@ -43,68 +45,102 @@ class VisionSensorApp(QWidget):
         self.setWindowTitle("Vision Sensor Control System")
 
         main_layout = QVBoxLayout()
-        control_layout = QHBoxLayout()
-        video_grid_layout = QGridLayout()
-        scene_info_layout = QHBoxLayout()
 
-        # Header with system name and buttons
-        system_name_label = QLabel("Object Tracking System")
-        control_layout.addWidget(system_name_label)
-
+        # Top control layout with Start, Stop, and Color Picker
+        top_layout = QHBoxLayout()
         self.start_button = QPushButton("Start")
         self.start_button.clicked.connect(self.start_simulation)
-        control_layout.addWidget(self.start_button)
+        top_layout.addWidget(self.start_button)
 
         self.stop_button = QPushButton("Stop")
         self.stop_button.clicked.connect(self.stop_simulation)
-        control_layout.addWidget(self.stop_button)
+        top_layout.addWidget(self.stop_button)
 
         self.color_selector = QComboBox()
         self.color_selector.addItems(["Red", "Green", "Blue"])
         self.color_selector.currentTextChanged.connect(self.update_selected_color)
-        control_layout.addWidget(self.color_selector)
+        top_layout.addWidget(self.color_selector)
 
-        main_layout.addLayout(control_layout)
+        main_layout.addLayout(top_layout)
 
-        # Main video display occupying 2x2 grid cells
-        self.main_video_label = QLabel("Main video from vision sensor")
-        self.main_video_label.setStyleSheet("border: 1px solid black;")
-        self.main_video_label.setFixedSize(518, 518)
+        # options_layout = QHBoxLayout()
+        #
+        # left_options_layout = QHBoxLayout()
+        # self.b1 = QRadioButton("Tracking mode")
+        # self.b1.setChecked(True)
+        # self.b1.toggled.connect(self.toggleCameraMode)
+        # options_layout.addWidget(self.b1)
+        #
+        # self.b2 = QRadioButton("Driving mode")
+        # options_layout.addWidget(self.b2)
+        # self.b2.toggled.connect(self.toggleCameraMode)
+        # options_layout.addLayout(left_options_layout)
+        #
+        # right_options_layout = QHBoxLayout()
+        # self.b3 = QRadioButton("Ground target")
+        # self.b3.setChecked(True)
+        # options_layout.addWidget(self.b3)
+        #
+        # self.b4 = QRadioButton("Air target")
+        # options_layout.addWidget(self.b4)
+        #
+        # options_layout.addLayout(right_options_layout)
+        # main_layout.addLayout(options_layout)
+
+        # Top Box
+        top_box = QLabel()
+        top_box.setFixedHeight(25)
+        top_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top_box.setStyleSheet("border: 1px solid black;")
+        main_layout.addWidget(top_box)
+
+        # Main video layout with left, right, and main video frames
+        video_layout = QHBoxLayout()
+
+        # Left box
+        left_box = QLabel()
+        left_box.setFixedSize(25, 512)
+        left_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_box.setStyleSheet("border: 1px solid black;")
+        video_layout.addWidget(left_box)
+
+        # Main video display
+        self.main_video_label = QLabel("Main frame\n512 x 512")
+        self.main_video_label.setFixedSize(512, 512)
         self.main_video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        video_grid_layout.addWidget(self.main_video_label, 0, 0, 2, 2)
+        self.main_video_label.setStyleSheet("border: 1px solid black;")
+        video_layout.addWidget(self.main_video_label)
 
-        # Sub videos display in the third column
-        self.vision_sensor_labels = {}
-        for i, name in enumerate(["HSV", "Mask"]):
-            label = QLabel(f"{name}")
-            label.setStyleSheet("border: 1px solid black;")
-            label.setFixedSize(256, 256)
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.vision_sensor_labels[name] = label
-            video_grid_layout.addWidget(label, i, 2)
+        # Right box
+        right_box = QLabel()
+        right_box.setFixedSize(25, 512)
+        right_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_box.setStyleSheet("border: 1px solid black;")
+        video_layout.addWidget(right_box)
 
-        main_layout.addLayout(video_grid_layout)
+        main_layout.addLayout(video_layout)
+
+        # Bottom Box
+        bottom_box = QLabel()
+        bottom_box.setFixedHeight(25)
+        bottom_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bottom_box.setStyleSheet("border: 1px solid black;")
+        main_layout.addWidget(bottom_box)
 
         # Status bar
         self.status_label = QPlainTextEdit()
         self.status_label.setReadOnly(True)
         self.status_label.setPlaceholderText("Scene info")
         self.status_label.setStyleSheet("border: 1px solid black;")
-        self.status_label.setFixedSize(774, 80)
-        scene_info_layout.addWidget(self.status_label)
-
-        main_layout.addLayout(scene_info_layout)
+        self.status_label.setFixedHeight(80)
+        main_layout.addWidget(self.status_label)
 
         self.setLayout(main_layout)
-
         self.closeEvent = self.on_close
 
     def set_noVideo_pixmap(self):
-        self.main_video_label.setPixmap(self.no_video_pixmap.scaled(518, 518, Qt.AspectRatioMode.KeepAspectRatio,
+        self.main_video_label.setPixmap(self.no_video_pixmap.scaled(512, 512, Qt.AspectRatioMode.KeepAspectRatio,
                                                                     Qt.TransformationMode.SmoothTransformation))
-        for label in self.vision_sensor_labels.values():
-            label.setPixmap(self.no_video_pixmap.scaled(256, 256, Qt.AspectRatioMode.KeepAspectRatio,
-                                                        Qt.TransformationMode.SmoothTransformation))
 
     def append_status(self, text):
         self.status_label.appendPlainText(text)
@@ -117,11 +153,11 @@ class VisionSensorApp(QWidget):
 
             # Get vision sensor handles
             self.append_status('Getting handles...')
-            self.vision_sensors['Main'] = self.sim.getObject('/UR5/Vision_sensor')
-            self.vision_sensor_script_funcs = self.sim.getScriptFunctions(self.sim.getObject('/UR5/Vision_sensor/Script'))
-            self.vision_sensors['HSV'] = self.sim.getObject('/UR5/hsv')
-            self.vision_sensors['Mask'] = self.sim.getObject('/UR5/mask')
-            self.proximity_sensor = self.sim.getObject('/UR5/Proximity_sensor')
+            self.vision_sensors['Main'] = self.sim.getObject('/PioneerP3DX_main/UR5/Vision_sensor')
+            #self.vision_sensors['Front_camera'] = self.sim.getObject('/PioneerP3DX_main/Front_camera')
+            self.vision_sensor_script_funcs = self.sim.getScriptFunctions(
+                self.sim.getObject('/PioneerP3DX_main/UR5/Vision_sensor/Script'))
+            self.proximity_sensor = self.sim.getObject('/PioneerP3DX_main/UR5/Proximity_sensor')
             for name in ['red', 'green', 'blue']:
                 self.target_handlers[name] = self.sim.getObject(f"/PioneerP3DX_{name}")
             self.append_status('Handles retrieved successfully.')
@@ -142,6 +178,9 @@ class VisionSensorApp(QWidget):
                 self.append_status('Simulation started.')
                 self.video_timer.timeout.connect(self.get_real_time_video_output)
                 self.video_timer.start(100)
+
+                self.proximity_timer.timeout.connect(self.check_proximity_sensor)
+                self.proximity_timer.start(5000)
             except Exception as e:
                 print(f'An error occurred while starting the simulation: {e}')
 
@@ -166,9 +205,23 @@ class VisionSensorApp(QWidget):
             except Exception as e:
                 print(f'An error occurred while updating the selected color: {e}')
 
+    # def toggleCameraMode(self):
+    #     try:
+    #         if self.b1.isChecked():
+    #             self.vision_sensor_script_funcs.toggleTracking(1)
+    #         elif self.b2.isChecked():
+    #             self.vision_sensor_script_funcs.toggleTracking(0)
+    #     except Exception as e:
+    #         print(f'An error occurred while toggling camera mode: {e}')
+
     def get_real_time_video_output(self):
         try:
-            img, resolution = self.sim.getVisionSensorImg(self.vision_sensors['Main'])
+            # img, resolution = None, None
+            # if self.b1.isChecked():
+            #     img, resolution = self.sim.getVisionSensorImage(self.vision_sensors['Main'])
+            # elif self.b2.isChecked():
+            #     img, resolution = self.sim.getVisionSensorImage(self.vision_sensors['Front_camera'])
+            img, resolution = self.sim.getVisionSensorImage(self.vision_sensors['Main'])
             if img is not None and resolution:
                 frame = np.frombuffer(img, dtype=np.uint8).reshape(resolution[1], resolution[0], 3)
                 frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
@@ -180,36 +233,14 @@ class VisionSensorApp(QWidget):
 
                 # Convert frame for PyQt display
                 annotated_frame = cv.cvtColor(annotated_frame, cv.COLOR_BGR2RGB)
-                qimg = QImage(annotated_frame.data, annotated_frame.shape[1], annotated_frame.shape[0], annotated_frame.strides[0], QImage.Format.Format_RGB888)
+                qimg = QImage(annotated_frame.data, annotated_frame.shape[1], annotated_frame.shape[0],
+                              annotated_frame.strides[0], QImage.Format.Format_RGB888)
                 pixmap = QPixmap.fromImage(qimg)
                 self.main_video_label.setPixmap(pixmap)
         except Exception as e:
             print(f'An error occurred while getting main video output: {e}')
 
-        # Process other vision sensors
-        for name, handle in self.vision_sensors.items():
-            if name != 'Main':
-                try:
-                    img, resolution = self.sim.getVisionSensorImg(handle)
-                    if img is not None and resolution:
-                        frame = np.frombuffer(img, dtype=np.uint8).reshape(resolution[1], resolution[0], 3)
-                        frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
-                        frame = cv.flip(frame, 0)
-
-                        # Resize the frame to fit the QLabel
-                        frame = cv.resize(frame, (
-                        self.vision_sensor_labels[name].width(), self.vision_sensor_labels[name].height()))
-
-                        # Convert frame for PyQt display
-                        frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-                        qimg = QImage(frame.data, frame.shape[1], frame.shape[0], frame.strides[0],
-                                      QImage.Format.Format_RGB888)
-                        pixmap = QPixmap.fromImage(qimg)
-                        self.vision_sensor_labels[name].setPixmap(pixmap)
-
-                except Exception as e:
-                    print(f'An error occurred while getting video output for {name}: {e}')
-
+    def check_proximity_sensor(self):
         try:
             res, dist, point, obj, n = self.sim.checkProximitySensor(self.proximity_sensor, self.selected_target)
             if res:
