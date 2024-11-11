@@ -39,6 +39,7 @@ class VisionSensorApp(QWidget):
         }
         self.status_label = None
         self.cameraMode = 1
+        self.pressed_keys = set()  # Set to keep track of pressed keys
         self.init_ui()
         self.load_scene()
 
@@ -125,6 +126,14 @@ class VisionSensorApp(QWidget):
         self.setLayout(main_layout)
         self.closeEvent = self.on_close
 
+        # Set focus policy to accept key events
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocus()
+
+        # Prevent child widgets from stealing focus
+        for widget in self.findChildren(QWidget):
+            widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
     def set_noVideo_pixmap(self):
         self.main_video_label.setPixmap(self.no_video_pixmap.scaled(512, 512, Qt.AspectRatioMode.KeepAspectRatio,
                                                                     Qt.TransformationMode.SmoothTransformation))
@@ -147,6 +156,11 @@ class VisionSensorApp(QWidget):
             self.proximity_sensor = self.sim.getObject('/PioneerP3DX_main/UR5/Proximity_sensor')
             for name in ['red', 'green', 'blue']:
                 self.target_handlers[name] = self.sim.getObject(f"/PioneerP3DX_{name}")
+
+            # Get motor handles
+            self.left_motor = self.sim.getObject('/PioneerP3DX_main/leftMotor')
+            self.right_motor = self.sim.getObject('/PioneerP3DX_main/rightMotor')
+
             self.append_status('Handles retrieved successfully.')
 
             # Default target
@@ -168,6 +182,10 @@ class VisionSensorApp(QWidget):
 
                 self.proximity_timer.timeout.connect(self.check_proximity_sensor)
                 self.proximity_timer.start(5000)
+
+                # Set focus to capture key events
+                self.setFocus()
+
             except Exception as e:
                 print(f'An error occurred while starting the simulation: {e}')
 
@@ -179,6 +197,7 @@ class VisionSensorApp(QWidget):
                 self.simulation_running = False
                 self.set_noVideo_pixmap()
                 self.video_timer.stop()
+                self.stop_robot()  # Stop the robot when simulation stops
                 self.append_status('Simulation stopped.')
             except Exception as e:
                 print(f'An error occurred while stopping the simulation: {e}')
@@ -199,9 +218,12 @@ class VisionSensorApp(QWidget):
                 if self.selected_mode == 'Tracking':
                     self.vision_sensor_script_funcs.toggleTracking(1)
                     self.cameraMode = 1
+                    self.stop_robot()  # Stop the robot when switching modes
                 elif self.selected_mode == 'Driving':
                     self.vision_sensor_script_funcs.toggleTracking(0)
                     self.cameraMode = 0
+                # Set focus to capture key events after mode change
+                self.setFocus()
             except Exception as e:
                 print(f'An error occurred while toggling camera mode: {e}')
 
@@ -230,15 +252,9 @@ class VisionSensorApp(QWidget):
                     frame = np.frombuffer(imgFC, dtype=np.uint8).reshape(resolutionFC[1], resolutionFC[0], 3)
                     frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
                     frame = cv.flip(frame, 0)
-
-                    # Process frame with YOLO model
-                    results = self.model.predict(source=frame, save=False, show=False, conf=0.5, verbose=False)
-                    annotated_frame = results[0].plot()
-
-                    # Convert frame for PyQt display
-                    annotated_frame = cv.cvtColor(annotated_frame, cv.COLOR_BGR2RGB)
-                    qimg = QImage(annotated_frame.data, annotated_frame.shape[1], annotated_frame.shape[0],
-                                  annotated_frame.strides[0], QImage.Format.Format_RGB888)
+                    frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+                    qimg = QImage(frame.data, frame.shape[1], frame.shape[0],
+                                  frame.strides[0], QImage.Format.Format_RGB888)
                     pixmap = QPixmap.fromImage(qimg)
                     self.main_video_label.setPixmap(pixmap)
         except Exception as e:
@@ -256,6 +272,63 @@ class VisionSensorApp(QWidget):
         if self.simulation_running:
             self.stop_simulation()
         event.accept()
+
+    def keyPressEvent(self, event):
+        if self.simulation_running and self.cameraMode == 0:
+            key = event.key()
+            if key not in self.pressed_keys:
+                self.pressed_keys.add(key)
+                self.update_robot_movement()
+
+    def keyReleaseEvent(self, event):
+        if self.simulation_running and self.cameraMode == 0:
+            key = event.key()
+            if key in self.pressed_keys:
+                self.pressed_keys.remove(key)
+                self.update_robot_movement()
+
+    def update_robot_movement(self):
+        if self.simulation_running and self.cameraMode == 0:
+            forward = Qt.Key.Key_W in self.pressed_keys
+            backward = Qt.Key.Key_S in self.pressed_keys
+            left = Qt.Key.Key_A in self.pressed_keys
+            right = Qt.Key.Key_D in self.pressed_keys
+
+            v_left = 0
+            v_right = 0
+            velocity = 2.0  # Adjust the speed as needed
+
+            if forward and not backward:
+                v_left += velocity
+                v_right += velocity
+            elif backward and not forward:
+                v_left -= velocity
+                v_right -= velocity
+
+            if left and not right:
+                v_left -= velocity / 2
+                v_right += velocity / 2
+            elif right and not left:
+                v_left += velocity / 2
+                v_right -= velocity / 2
+
+            # Limit velocities to max/min values if needed
+            max_velocity = 5.0
+            v_left = max(min(v_left, max_velocity), -max_velocity)
+            v_right = max(min(v_right, max_velocity), -max_velocity)
+
+            # Set the wheel velocities
+            self.sim.setJointTargetVelocity(self.left_motor, v_left)
+            self.sim.setJointTargetVelocity(self.right_motor, v_right)
+        else:
+            # If not in driving mode or simulation not running, stop the robot
+            self.stop_robot()
+
+    def stop_robot(self):
+        # Stop the robot's wheels
+        if hasattr(self, 'left_motor') and hasattr(self, 'right_motor'):
+            self.sim.setJointTargetVelocity(self.left_motor, 0)
+            self.sim.setJointTargetVelocity(self.right_motor, 0)
 
 
 if __name__ == "__main__":
